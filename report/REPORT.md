@@ -49,6 +49,20 @@ Mọi số liệu dưới đây được sinh bởi `python -m src.run_topic_a a
 
 Nhận xét cho B5 (so sánh hai dataset): cùng 1° yaw, nuScenes dịch **26 px**, KITTI dịch **15 px**, vì tiêu cự nuScenes lớn hơn (ảnh 1600 px so với 1242 px), nhưng box hit của nuScenes lại giảm **chậm hơn** ở vật xa (95% so với 71%). Tôi **chưa kiểm chứng** nguyên nhân; giả thuyết hợp lý là 2D box nuScenes được sinh từ phép chiếu 3D box nên rộng hơn box KITTI vẽ tay. Ngoài ra trục `pitch`/`roll` của nuScenes bị hoán đổi so với KITTI, vì trục x của LiDAR nuScenes hướng sang phải (xem `data/README.md`): "roll" quanh x chính là camera pitch (22 px/° ở khoảng cách vừa, tương đương yaw), còn "pitch" quanh y (hướng trước) chỉ xoay ảnh quanh tâm. Score trên nuScenes không dùng được: median chỉ 81.5 điểm biên mỗi frame (KITTI 913.5), nên phát hiện chỉ 10–15%, sát mức báo nhầm 5%.
 
+**Bảng 3 — Quét yaw trên 3 frame KITTI theo script mẫu của codelab** (`results/yaw_perturb_sweep.csv`; `hit_ratio` = % điểm trong 3D box GT rơi vào 2D box của label, tính cả điểm vốn đã lệch ở calib đúng nên mức sàn < 100%)
+
+| yaw | 000008 (đông xe) | 000011 (nhiều người đi bộ) | 000049 (nhiều vật bị che) |
+|---|---|---|---|
+| 0° | 99.63% | 99.45% | 99.25% |
+| 0.5° | 99.57% | 91.88% | 97.46% |
+| 1° | 98.62% | 77.44% | 93.50% |
+| 2° | 94.81% | 45.44% | 84.74% |
+| 3° | 90.98% | 21.23% | 74.32% |
+
+Frame nhiều người đi bộ (000011) giảm nhanh nhất: ở 1° tụt từ 99.5% xuống 77.4%, còn frame đông xe (000008) gần như không đổi (98.6%) vì xe rộng hơn người nhiều lần trên ảnh, nên cùng một độ dịch pixel vẫn nằm trong box. Số này khớp tuyệt đối bảng kỳ vọng của đề (sai lệch 0.0), nên cũng là phép kiểm chứng độc lập cho 2 hàm `velo_to_cam`, `cam_to_image` và cho metric ở Bảng 1 (cách tính khác: Bảng 1 chỉ giữ điểm vốn đã trong 2D box ở calib đúng nên baseline = 100%).
+
+![yaw sweep](../results/figures/yaw_sweep.png)
+
 ![demo gần](../results/figures/demo_overlay_near_000019.png)
 ![demo vừa](../results/figures/demo_overlay_mid_000011.png)
 ![demo xa](../results/figures/demo_overlay_far_000004.png)
@@ -89,6 +103,8 @@ python tools/verify_data.py --data-root data/nuscenes_mini_subset
 python -m src.test_projection
 python -m starter.projection --data-root data/kitti_mini --frame 000011
 python -m starter.projection --data-root data/nuscenes_mini_subset --frame scene-0103_010
+python -m src.exp_yaw_sweep --data-root data/kitti_mini --frames 000008 000011 000049
+python -m src.plot_yaw_sweep
 python -m src.run_topic_a all      # demo + sweep + plots + failures (xem --help để chạy từng bước)
 python tools/check_submission.py
 ```
@@ -100,3 +116,4 @@ Kết quả: `results/calib_sweep_summary.csv`, `results/calib_sweep_frames.csv`
 | Công cụ | Dùng cho việc gì | Bạn đã kiểm chứng thế nào |
 |---|---|---|
 | Claude Code (Claude Sonnet 5.5) | Viết 2 hàm TODO trong `starter/projection.py`, viết `src/align_metrics.py` và `src/run_topic_a.py`, chạy thí nghiệm, soạn nháp báo cáo này, chẩn đoán lỗi cài đặt pip (`UnicodeDecodeError` do `requirements.txt`) | Điểm velodyne (10, 0, 0) cho z_cam = 9.73 (đúng kỳ vọng ≈ 10); đã xem ảnh overlay trên synthetic/KITTI/nuScenes, điểm khớp xe/người/mặt đường; chạy lại `sweep` + `plots` cho cùng hash CSV; số trong báo cáo đối chiếu trực tiếp với `results/calib_sweep_summary.csv`; score ban đầu phẳng đã được sửa bằng cách trừ `chance` và ghi lại trong mục 2 |
+| Script mẫu của codelab Day 6 (không phải AI) | `src/exp_yaw_sweep.py`, `src/plot_yaw_sweep.py`, `src/test_projection.py` lấy từ hướng dẫn của đề làm điểm xuất phát | Số `hit_ratio` khớp bảng kỳ vọng của đề (sai lệch 0.0); chạy lại 2 lần cho file giống hệt. Phần mở rộng (6 trục, tách khoảng cách, nuScenes, score) nằm ở `src/run_topic_a.py` |
