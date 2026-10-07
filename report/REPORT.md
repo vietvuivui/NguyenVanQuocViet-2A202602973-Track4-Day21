@@ -86,7 +86,9 @@ export PYTHONUTF8=1      # PowerShell: $env:PYTHONUTF8="1"
 pip install -r requirements.txt
 python tools/verify_data.py --data-root data/kitti_mini
 python tools/verify_data.py --data-root data/nuscenes_mini_subset
+python -m src.test_projection
 python -m starter.projection --data-root data/kitti_mini --frame 000011
+python -m starter.projection --data-root data/nuscenes_mini_subset --frame scene-0103_010
 python -m src.run_topic_a all      # demo + sweep + plots + failures (xem --help để chạy từng bước)
 python tools/check_submission.py
 ```
