@@ -295,12 +295,95 @@ def stage_failures_fov(_args) -> None:
     print("fail_02 saved")
 
 
+def stage_failures_time(_args) -> None:
+    """fail_03 (lớp Time): nuScenes không bù chuyển động xe giữa lúc LiDAR và camera chụp.
+    Đo dịch pixel của từng điểm giữa 2 cách chiếu, tách theo khoảng cách; vẽ mũi tên dịch chuyển cho 1 frame."""
+    root = DATASETS["nuscenes"]
+    rows = []
+    for f in list_frames(root):
+        a = load(root, f, use_ego_motion=True)
+        b = load(root, f, use_ego_motion=False)
+        ok = np.isfinite(a["points"][:, :3]).all(axis=1)
+        ua, da, ma = project_velo_to_image(a["points"][ok], a["calib"], a["image"].shape)
+        ub, db, mb = project_velo_to_image(b["points"][ok], b["calib"], b["image"].shape)
+        both = ma & mb
+        ia, ib = np.cumsum(ma) - 1, np.cumsum(mb) - 1
+        d = np.linalg.norm(ua[ia[both]] - ub[ib[both]], axis=1)
+        dep = da[ia[both]]
+        rows.append({"frame": f, "inside_with_ego": int(ma.sum()), "inside_no_ego": int(mb.sum()),
+                     "mean_shift_px": d.mean(),
+                     "median_shift_px_lt15m": np.median(d[dep < 15]) if (dep < 15).any() else np.nan,
+                     "median_shift_px_ge30m": np.median(d[dep >= 30]) if (dep >= 30).any() else np.nan,
+                     "dt_cam_minus_lidar_ms": (a["timestamp_camera_us"] - a["timestamp_lidar_us"]) / 1000})
+    df = pd.DataFrame(rows)
+    df.to_csv(RESULTS / "nuscenes_ego_shift.csv", index=False)
+    print(df.groupby(df.frame.str[:10])[["mean_shift_px", "median_shift_px_lt15m", "median_shift_px_ge30m"]].mean().round(2))
+    print("frame lệch nhiều nhất:", df.sort_values("mean_shift_px").iloc[-1][["frame", "mean_shift_px"]].tolist())
+
+    f = "scene-0103_010"
+    a = load(root, f, use_ego_motion=True)
+    b = load(root, f, use_ego_motion=False)
+    ok = np.isfinite(a["points"][:, :3]).all(axis=1)
+    ua, da, ma = project_velo_to_image(a["points"][ok], a["calib"], a["image"].shape)
+    ub, db, mb = project_velo_to_image(b["points"][ok], b["calib"], b["image"].shape)
+    top = overlay_points(a["image"], ua, da, radius=3)
+    bot = overlay_points(b["image"], ub, db, radius=3)
+    both = ma & mb
+    ia, ib = np.cumsum(ma) - 1, np.cumsum(mb) - 1
+    sel = np.flatnonzero(both)[::4]
+    for k in sel:
+        if da[ia[k]] < 20:
+            cv2.arrowedLine(bot, tuple(int(x) for x in ua[ia[k]]), tuple(int(x) for x in ub[ib[k]]),
+                            (255, 255, 255), 1, tipLength=0.3)
+    for img, txt in ((top, f"{f} WITH ego-motion compensation: {int(ma.sum())} pts in image"),
+                     (bot, f"{f} WITHOUT compensation: {int(mb.sum())} pts; arrows = shift (pts < 20 m)")):
+        cv2.rectangle(img, (0, 0), (1150, 48), (0, 0, 0), -1)
+        cv2.putText(img, txt, (10, 32), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+    cv2.imwrite(str(FIG / "fail_03_nusc_no_ego_motion_scene-0103_010.png"), np.vstack([top, bot]))
+    print("fail_03 saved")
+
+
+def stage_failures_geometry(_args) -> None:
+    """fail_04 (lớp Geometry): KITTI 000011, yaw 2 deg. Vật hẹp/xa mất hết điểm khỏi 2D box. Lưu bảng từng object."""
+    root, f = DATASETS["kitti"], "000011"
+    fr = load(root, f)
+    sh = fr["image"].shape
+    sets = object_point_sets(fr["points"], fr["calib"], fr["labels"], sh)
+    c2 = perturb_extrinsic(fr["calib"], yaw_deg=2.0)
+    rows = []
+    for o, r in zip(sets, box_hit_stats(sets, c2, sh)):
+        x1, y1, x2, y2 = o["bbox"]
+        rows.append({"type": o["type"], "distance_m": round(o["dist"], 1), "bbox_width_px": round(x2 - x1),
+                     "points": r["n"], "hit_pct": round(100 * r["hits"] / r["n"], 1),
+                     "mean_shift_px": round(r["shift_sum"] / r["n_front"], 1)})
+    tab = pd.DataFrame(rows).sort_values("distance_m")
+    tab.to_csv(RESULTS / "yaw2_frame000011_objects.csv", index=False)
+    print(tab.to_string(index=False))
+    worst = tab[tab.hit_pct == 0].sort_values("distance_m").iloc[-1]
+    panels = []
+    for tag, c in (("calib OK", fr["calib"]), ("yaw +2 deg", c2)):
+        uv, depth, _ = project_velo_to_image(fr["points"], c, sh)
+        vis = overlay_points(fr["image"], uv, depth, radius=2)
+        for o in fr["labels"]:
+            d = float(np.linalg.norm(o.location[[0, 2]]))
+            hot = abs(d - worst.distance_m) < 0.2 and o.type == worst.type
+            vis = draw_box2d(vis, o.bbox, color=(0, 0, 255) if hot else (0, 255, 0),
+                             label=f"{o.type} {d:.0f}m" if hot else None)
+        cv2.rectangle(vis, (0, 0), (560, 26), (0, 0, 0), -1)
+        cv2.putText(vis, f"{f} {tag}  (red box: {worst.type} {worst.distance_m:.0f}m, {int(worst.bbox_width_px)}px wide)",
+                    (6, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+        panels.append(vis)
+    cv2.imwrite(str(FIG / "fail_04_kitti_yaw2_narrow_object_000011.png"), np.vstack(panels))
+    print("fail_04 saved")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("stage", choices=["demo", "sweep", "plots", "failures", "all"])
     args = ap.parse_args()
     stages = {"demo": stage_demo, "sweep": stage_sweep, "plots": stage_plots,
-              "failures": lambda a: (stage_failures(a), stage_failures_fov(a))}
+              "failures": lambda a: (stage_failures(a), stage_failures_fov(a), stage_failures_time(a),
+                                  stage_failures_geometry(a))}
     for name in (stages if args.stage == "all" else [args.stage]):
         stages[name](args)
 

@@ -75,15 +75,47 @@ So từng frame với chính nó khi sạch thì tín hiệu có thật: score g
 
 ## 3. Failure case
 
-**fail_01 — score không phát hiện được yaw 3° (lớp Metric / Preprocess).** 12/20 frame KITTI có score ở yaw 3° vẫn ≥ ngưỡng. Ví dụ frame 000048 (cây, xe đạp, bụi cây dày): score 0.060 (calib đúng) → 0.034 (yaw 3°), vẫn cao hơn ngưỡng 0.007. Nguyên nhân: cảnh lá cây cho ~3900 điểm "biên độ sâu" nhiễu (không phải biên vật thể), còn ảnh đầy cạnh Canny, nên điểm lệch 45 px vẫn trúng cạnh khác. Cảnh có ít biên rõ ràng (đường thẳng, vài xe) mới cho score nhạy. Cách phát hiện khi chạy thật: chỉ tính score trên cảnh có đủ biên sạch (ví dụ biên từ cột, mép xe), và gộp nhiều frame thay vì quyết định từng frame.
+Bốn failure case, mỗi cái theo khung: trường hợp, quan sát, nguyên nhân, lớp debug, cách phát hiện khi chạy thật. Ảnh sinh bởi `python -m src.run_topic_a failures`.
+
+### fail_01 — Metric: edge-alignment score không phát hiện yaw 3°
 
 ![fail 01](../results/figures/fail_01_score_miss_yaw3_000048.png)
 
-**fail_02 — "% điểm trong ảnh" tăng khi calibration xấu đi (lớp Metric).** Trên nuScenes, xoay LiDAR 3° quanh trục x làm tỉ lệ điểm trong ảnh tăng từ 8.73% lên 9.79% (điểm vẫn trong khung hình nhưng xếp chồng sai lên vật), và KITTI tz 10 cm tăng 15.75% → 16.48%. Vì vậy % inside-FOV không thể làm chỉ số sức khoẻ calibration. Hình dưới (scene-0103_010, trên: calib đúng; dưới: xoay 3°): toàn bộ vòng quét LiDAR bị đẩy lệch lên trên khoảng 68 px (số dịch trung bình ở khoảng cách vừa) so với vật thể, nhưng số điểm trong ảnh lại tăng.
+- **Trường hợp:** KITTI frame 000048 (cây, xe đạp, bụi cây dày), yaw +3°. 12/20 frame KITTI có score ở yaw 3° vẫn ≥ ngưỡng 0.007.
+- **Quan sát:** score 0.060 (calib đúng) → 0.034 (yaw 3°), vẫn cao hơn ngưỡng; ở yaw 1° chỉ 10% frame bị phát hiện (báo nhầm 5%).
+- **Nguyên nhân:** lá cây cho khoảng 3900 điểm "biên độ sâu" nhiễu (không phải biên vật thể) và ảnh đầy cạnh Canny, nên điểm lệch tới 45 px vẫn trúng cạnh khác. Cảnh ít biên rõ ràng (đường thẳng, vài xe) mới cho score nhạy.
+- **Lớp debug:** Metric (kèm Preprocess: chọn điểm biên).
+- **Cách phát hiện khi chạy thật:** chỉ tính score trên cảnh có đủ biên sạch (cột, mép xe), lưu score baseline lúc calibrate theo từng cảnh, và quyết định theo trung bình trượt nhiều frame (so từng frame với chính nó khi sạch thì score giảm ở 85% frame yaw 1°).
+
+### fail_02 — Metric: "% điểm trong ảnh" tăng khi calibration xấu đi
 
 ![fail 02](../results/figures/fail_02_fov_up_when_miscalibrated_scene-0103_010.png)
 
-**Kết quả âm (Time):** bỏ bù chuyển động xe giữa lúc LiDAR và camera chụp (camera chụp sớm hơn LiDAR trung bình 35.6 ms) chỉ làm score nuScenes đổi −0.006, nhỏ hơn nhiễu giữa các frame (std 0.049–0.054), nên đồng bộ thời gian không phân biệt được bằng score này (`results/nuscenes_ego_motion_ablation.csv`).
+- **Trường hợp:** nuScenes `scene-0103_010`, xoay LiDAR 3° quanh trục x của LiDAR (= camera pitch). Trên (calib đúng), dưới (lệch 3°).
+- **Quan sát:** tỉ lệ điểm trong ảnh tăng 8.73% → 9.79% (trung bình 80 frame); KITTI tz 10 cm tăng 15.75% → 16.48%. Ở hình, toàn bộ vòng quét LiDAR dịch lên khoảng 68 px so với vật thể, nhưng số điểm trong ảnh lại tăng.
+- **Nguyên nhân:** nhiều điểm hơn lọt vào khung hình ở mép trên so với số điểm rời khung ở mép dưới (tôi chưa tách riêng hai phần này). Metric chỉ đếm điểm, không so điểm với vật thể.
+- **Lớp debug:** Metric.
+- **Cách phát hiện khi chạy thật:** đừng dùng % inside-FOV làm chỉ số sức khoẻ calibration (hỏi: "nếu calibration sai hoàn toàn, metric có đổi không?"). Dùng hit rate theo box hoặc score dựa trên cạnh.
+
+### fail_03 — Time: không bù chuyển động xe giữa lúc LiDAR và camera chụp
+
+![fail 03](../results/figures/fail_03_nusc_no_ego_motion_scene-0103_010.png)
+
+- **Trường hợp:** nuScenes `scene-0103_010`, chiếu LiDAR lên CAM_FRONT, tắt bù chuyển động (`--ignore-ego-motion`). Số liệu 80 frame: `results/nuscenes_ego_shift.csv`.
+- **Quan sát:** số điểm vào ảnh giảm 3120 → 2911. Điểm dịch trung bình 9.9 px (scene-0103) và 12.0 px (scene-1094); điểm gần dưới 15 m dịch trung vị 13.6–15.1 px, còn điểm xa từ 30 m trở lên chỉ 2.2–4.7 px. Frame lệch nhiều nhất là `scene-1094_015` (22.4 px).
+- **Nguyên nhân:** camera chụp sớm hơn LiDAR trung bình 35.6 ms (`timestamp_camera_us − timestamp_lidar_us`), xe tiến về phía trước trong khoảng đó nên điểm dịch toả ra từ điểm biến mất (mũi tên trong ảnh), lớn ở gần và nhỏ ở xa theo thị sai ∝ 1/độ sâu. Độ dịch trung bình tương đương khoảng 0.4–0.5° yaw (26 px/° ở nuScenes, Bảng 2).
+- **Lớp debug:** Time.
+- **Cách phát hiện khi chạy thật:** edge-alignment score **không phân biệt được** lỗi này (đổi −0.006, trong khi std giữa frame là 0.049–0.054; `results/nuscenes_ego_motion_ablation.csv`), nên phải theo dõi riêng độ lệch timestamp camera − LiDAR (cảnh báo khi vượt 40 ms hoặc dao động giữa các frame) và kiểm tra bù chuyển động còn bật, thay vì đoán từ chất lượng overlay.
+
+### fail_04 — Geometry: vật hẹp và xa mất hết điểm khỏi 2D box khi lệch yaw
+
+![fail 04](../results/figures/fail_04_kitti_yaw2_narrow_object_000011.png)
+
+- **Trường hợp:** KITTI frame 000011, yaw +2°, 6 object có label (`results/yaw2_frame000011_objects.csv`).
+- **Quan sát:** người ở 34.2 m và người ở 17.8 m mất **100%** điểm khỏi 2D box (hit 0%), người ở 13.4 m còn 28%, xe ở 6.6 m còn 39%, xe ở 27.1 m còn 61%.
+- **Nguyên nhân:** yaw 2° dịch mọi điểm khoảng 25–44 px, bất kể khoảng cách. Người ở 34.2 m chỉ rộng **15 px** và người ở 17.8 m rộng 28 px, nhỏ hơn độ dịch nên điểm rơi hẳn ra ngoài. Xe ở 6.6 m rộng 86 px nhưng nằm sát mép ảnh bên trái, nên nhiều khả năng điểm bị dịch ra ngoài mép ảnh/box (chưa kiểm chứng riêng). Hit rate phụ thuộc vào độ rộng pixel của box chứ không phụ thuộc khoảng cách.
+- **Lớp debug:** Geometry (extrinsic `Tr_velo_to_cam` sai góc).
+- **Cách phát hiện khi chạy thật:** theo dõi hit rate **riêng cho các object nhỏ/xa** (rộng dưới 30 px), vì chúng báo động sớm nhất (yaw 0.5° đã làm vật xa mất 11%). Ngưỡng gợi ý: mức sàn thực tế của metric là 99.3–99.6%, cảnh báo khi trung bình trượt của nhóm vật xa tụt dưới 90%.
 
 ## 4. Khuyến nghị nếu triển khai thật
 
