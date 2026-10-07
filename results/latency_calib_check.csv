@@ -1,0 +1,9 @@
+dataset,frame,step,runs,p50_ms,p95_ms,cpu
+kitti,000011,project_points,30,7.36,8.59,"Intel64 Family 6 Model 186 Stepping 3, GenuineIntel"
+kitti,000011,image_edge_distance(Canny+DT),30,4.59,5.49,"Intel64 Family 6 Model 186 Stepping 3, GenuineIntel"
+kitti,000011,edge_alignment_score,30,18.31,22.91,"Intel64 Family 6 Model 186 Stepping 3, GenuineIntel"
+kitti,000011,"box_hit_stats(offline, can label)",30,0.2,0.47,"Intel64 Family 6 Model 186 Stepping 3, GenuineIntel"
+nuscenes,scene-0103_010,project_points,30,3.08,4.28,"Intel64 Family 6 Model 186 Stepping 3, GenuineIntel"
+nuscenes,scene-0103_010,image_edge_distance(Canny+DT),30,14.06,16.5,"Intel64 Family 6 Model 186 Stepping 3, GenuineIntel"
+nuscenes,scene-0103_010,edge_alignment_score,30,13.37,15.45,"Intel64 Family 6 Model 186 Stepping 3, GenuineIntel"
+nuscenes,scene-0103_010,"box_hit_stats(offline, can label)",30,0.12,0.14,"Intel64 Family 6 Model 186 Stepping 3, GenuineIntel"

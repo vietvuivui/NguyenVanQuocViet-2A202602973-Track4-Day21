@@ -119,7 +119,11 @@ Bốn failure case, mỗi cái theo khung: trường hợp, quan sát, nguyên n
 
 ## 4. Khuyến nghị nếu triển khai thật
 
-Use-case: xe ADAS/robot với LiDAR + camera dùng chung để gán nhãn và fusion. Câu hỏi "bracket lệch 1° sau va chạm nhẹ thì có tự phát hiện được không": **không đáng tin nếu chỉ dựa vào một frame**. Với 1° yaw, vật xa 30 m dịch 15 px và mất 29% điểm khỏi box, nên fusion ở tầm xa hỏng trước, trong khi vật gần vẫn ổn nên khó nhận ra bằng mắt. Trade-off: score tự giám sát rẻ (chỉ Canny + vài phép nhân ma trận, chạy trên CPU) nhưng nhạy yếu và phụ thuộc cảnh; box-hit nhạy hơn nhiều nhưng cần label hoặc detector 2D+3D nên chỉ dùng được offline. Đề xuất: (1) lưu baseline score theo từng cảnh/xe lúc calibrate, (2) báo động khi **trung bình trượt** nhiều frame giảm liên tục, không báo theo từng frame, (3) kiểm tra riêng vật >30 m vì chúng nhạy nhất với góc, (4) không dùng % điểm trong ảnh làm chỉ số. Log khi chạy thật: score trung bình trượt + số điểm biên, box hit của các detection ổn định (xe đỗ) theo khoảng cách, nhiệt độ/va chạm từ IMU để đối chiếu thời điểm drift.
+**Use-case:** xe giao hàng tự hành hoặc ADAS tốc độ thấp trong đô thị (dưới 30 km/h) dùng LiDAR + camera cho fusion. Câu hỏi "bracket lệch 1° sau va chạm nhẹ có tự phát hiện được không": **không đáng tin nếu chỉ dựa vào một frame**. Yaw 1° dịch điểm 15 px (KITTI) / 26 px (nuScenes) và làm vật xa hơn 30 m mất 29% điểm khỏi box (còn 71%), trong khi vật gần dưới 15 m chỉ mất 4%, nên fusion tầm xa hỏng trước mà quan sát gần vẫn trông ổn.
+
+**Đánh đổi (đo trên CPU Intel, p50/p95 qua 30 lần, bỏ lần đầu, `results/latency_calib_check.csv`):** edge-alignment score tốn 18.3/22.9 ms (KITTI) và 13.4/15.5 ms (nuScenes), cộng 4.6 ms (KITTI) hoặc 14.1 ms (nuScenes) cho Canny + distance transform, tức khoảng 23–27 ms mỗi frame. Chạy mỗi 10 giây một frame thì chỉ tốn khoảng 0.25% một lõi, nhưng phát hiện chậm vài chục giây; chạy mỗi frame thì phát hiện nhanh mà tốn tài nguyên lúc xe đang cần tính toán cho detection. Hit rate theo box chỉ tốn 0.2 ms nhưng cần label hoặc detection ổn định (ví dụ xe đỗ), nên chỉ dùng được khi có detector 2D + 3D đồng thuận. Score không thay thế được hit rate: nó yếu (10% phát hiện ở yaw 1°) và gần như mù với nuScenes 32 beam.
+
+**Chỉ số cần ghi log (đề xuất, chưa hiệu chỉnh trên dữ liệu thật):** (1) hit rate trung bình trượt của các detection **ở xa trên 30 m** mỗi phút: theo Bảng 1, yaw 0.5° đã kéo xuống 88.9% nên ngưỡng cảnh báo 90% trong 5 phút liên tục bắt được từ 0.5° ở KITTI, nhưng nuScenes ở 0.5° vẫn 99.4% nên ngưỡng phải đặt riêng theo từng bộ cảm biến; (2) score baseline lưu lúc calibrate và độ sụt của trung bình trượt so với baseline đó; (3) độ lệch timestamp camera − LiDAR (cảnh báo khi vượt 40 ms; ở nuScenes là 35.6 ms); (4) nhiệt độ và IMU của giá đỡ cảm biến để phân biệt lệch do va chạm với giãn nở nhiệt. Không dùng % điểm trong ảnh làm chỉ số (xem fail_02).
 
 ## 5. Cách chạy lại
 
@@ -138,10 +142,11 @@ python -m starter.projection --data-root data/nuscenes_mini_subset --frame scene
 python -m src.exp_yaw_sweep --data-root data/kitti_mini --frames 000008 000011 000049
 python -m src.plot_yaw_sweep
 python -m src.run_topic_a all      # demo + sweep + plots + failures (xem --help để chạy từng bước)
+python -m src.latency_topic_a --runs 30   # latency p50/p95 (phụ thuộc CPU nên số ms sẽ khác máy bạn)
 python tools/check_submission.py
 ```
 
-Kết quả: `results/calib_sweep_summary.csv`, `results/calib_sweep_frames.csv`, `results/calib_sweep_boxes.csv`, `results/nuscenes_ego_motion_ablation.csv` và các ảnh trong `results/figures/`. Code: `src/align_metrics.py` (metric), `src/run_topic_a.py` (thí nghiệm, có tham số dòng lệnh và `--help`), và 2 hàm `velo_to_cam`, `cam_to_image` trong `starter/projection.py`.
+Kết quả: `results/calib_sweep_summary.csv`, `results/calib_sweep_frames.csv`, `results/calib_sweep_boxes.csv`, `results/nuscenes_ego_motion_ablation.csv`, `results/nuscenes_ego_shift.csv`, `results/yaw2_frame000011_objects.csv`, `results/yaw_perturb_sweep.csv`, `results/latency_calib_check.csv` và các ảnh trong `results/figures/`. Code: `src/align_metrics.py` (metric), `src/run_topic_a.py` (thí nghiệm, có tham số dòng lệnh và `--help`), và 2 hàm `velo_to_cam`, `cam_to_image` trong `starter/projection.py`.
 
 ## 6. Khai báo sử dụng AI
 
